@@ -4,7 +4,7 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches:
-      - master
+      - main
 
 jobs:
   build-linux:
@@ -27,11 +27,14 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Rename plugin artifact
+        run: cp build/libzephyr_rtos.so libzephyr_rtos-linux-${{matrix.arch == '32' && 'x86' || 'x64'}}.so
+
       - name: Upload plugin artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: linux-${{matrix.arch == '32' && 'x86' || 'x64'}}
-          path: build/libzephyr_rtos.so
+          path: libzephyr_rtos-linux-${{matrix.arch == '32' && 'x86' || 'x64'}}.so
 
       - name: Run unit tests
         run: ./build/unittests/plugin_test
@@ -50,11 +53,14 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Rename plugin artifact
+        run: cp build/libzephyr_rtos.so libzephyr_rtos-macos-universal.so
+
       - name: Upload plugin artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: macos-universal
-          path: build/libzephyr_rtos.so
+          path: libzephyr_rtos-macos-universal.so
 
       - name: Run unit tests
         run: ./build/unittests/plugin_test
@@ -76,11 +82,51 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Rename plugin artifact
+        run: cp build/Release/zephyr_rtos.dll libzephyr_rtos-windows-${{matrix.arch == 'win32' && 'x86' || 'x64'}}.dll
+
       - name: Upload plugin artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ${{runner.os}}-${{matrix.arch == 'win32' && 'x86' || 'x64'}}
-          path: build/Release/zephyr_rtos.dll
+          path: libzephyr_rtos-windows-${{matrix.arch == 'win32' && 'x86' || 'x64'}}.dll
 
       - name: Run unit tests
         run: ./build/unittests/Release/plugin_test.exe
+
+
+  release:
+    name: Update latest release
+    needs: [build-linux, build-nix, build-win]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-latest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Delete previous latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete latest --yes --cleanup-tag || true
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Update latest release
+        uses: softprops/action-gh-release@2bb465e97f322d3cb2a965294d483e0d26a67aa9 # v3.0.1
+        with:
+          tag_name: latest
+          name: latest
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: true
+          files: |
+            release-assets/*
+            README.md
